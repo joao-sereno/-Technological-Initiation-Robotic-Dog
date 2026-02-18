@@ -1,7 +1,7 @@
 %Selecionando portas COM livres para começar a comunicação serial entre
 %Matlab e o Arduino. 
-portasDisponiveis = serialportlist;
-device = serialport(portasDisponiveis(1),9600);
+portasDisponiveis = serialportlist
+device = serialport(portasDisponiveis(1),115200)
 configureTerminator(device,"LF")
 %%
 %Definindo as matrizes de transformações homogêneas
@@ -33,6 +33,12 @@ showZeroConfig(leg1_afrente,leg1_atras,leg2_afrente,leg2_atras);
 auxSize = length(ikineCycle1Afrente);
 [offsetFirstLeg,offsetSecondLeg,offsetThirdLeg,offsetFourthLeg] = offSet(k,auxSize);
 %%
+%Obtendo os angulos das juntas de cada perna com base no ciclo de cada uma
+%respeitando os offset que mantém o padrão de 25% no ar e 75% no chão
+% usando a função gait para definir quando cada perna começa a se mexer. Após
+%isto, enviando serialmente os valores dos angulos já em graus para o
+%arduino com um ratecontrol de 50Hz, pois os servos motores tem uma freq de
+%50hz.
 r = rateControl(50);
 reset(r);
 cycleSize = length(ikineCycle1Afrente);
@@ -40,9 +46,9 @@ j = 1;
 i = 1;
 while(1)
     [ang1,ang2,ang3,ang4] = jointAngles(cycleSize,offsetFirstLeg,...
-    offsetSecondLeg,offSetThirdLeg,offSetFourthLeg,ikineCycle1Afrente, ...
+    offsetSecondLeg,offsetThirdLeg,offsetFourthLeg,ikineCycle1Afrente, ...
     ikineCycle1Atras,ikineCycle2Afrente,ikineCycle2Atras,i);
-    angles = sprintf("%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f,%.4f\n"...
+    angles = sprintf("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d"...
     ,ang1(1,1),ang1(1,2),ang1(1,3),ang2(1,1),...
     ang2(1,2),ang2(1,3),ang3(1,1),ang3(1,2),ang3(1,3),ang4(1,1),ang4...
     (1,2),ang4(1,3));
@@ -52,28 +58,28 @@ while(1)
         i = 1;
     end
     j = j + 1;
-    if (j > 1)
+    if (j > 2)
         break;
     end
 end
 %%
-global d
-d = rateControl(200);
-j = 1;
-while(1)
-     for i = 1:size(ikineCycle1Afrente,1)
-         leg1_afrente.show(gait(ikineCycle1Afrente,i,offsetFirstLeg,false),FastUpdate=true,PreservePlot=false);hold on
-         leg2_afrente.show(gait(ikineCycle2Afrente,i,offsetSecondLeg,false),FastUpdate=true,PreservePlot=false);
-         leg1_atras.show(gait(ikineCycle1Atras,i,offsetThirdLeg,false),FastUpdate=true, PreservePlot= false);
-         leg2_atras.show(gait(ikineCycle2Atras,i,offsetFourthLeg,false),FastUpdate=true,PreservePlot=false);
-         hold off
-         d.waitfor;
-     end
-    j = j + 1;
-    if (j > 3)
-        break;
-    end
-end
+% global d
+% d = rateControl(200);
+% j = 1;
+% while(1)
+%      for i = 1:size(ikineCycle1Afrente,1)
+%          leg1_afrente.show(gait(ikineCycle1Afrente,i,offsetFirstLeg,false),FastUpdate=true,PreservePlot=false);hold on
+%          leg2_afrente.show(gait(ikineCycle2Afrente,i,offsetSecondLeg,false),FastUpdate=true,PreservePlot=false);
+%          leg1_atras.show(gait(ikineCycle1Atras,i,offsetThirdLeg,false),FastUpdate=true, PreservePlot= false);
+%          leg2_atras.show(gait(ikineCycle2Atras,i,offsetFourthLeg,false),FastUpdate=true,PreservePlot=false);
+%          hold off
+%          d.waitfor;
+%      end
+%     j = j + 1;
+%     if (j > 3)
+%         break;
+%     end
+% end
 %% 
 function [e1,e2,e3,e4] = creatHomoMatrix(L1,L2,L3,L4,L5)
     e1 = ETS3.Rx("q1")*ETS3.Ty(-L1)*ETS3.Tx(L2)*ETS3.Tz(L3)*ETS3.Ry("q2")*ETS3.Tz(L4)*ETS3.Ry("q3")*ETS3.Tz(L5);
@@ -152,13 +158,13 @@ function [ang1,ang2,ang3,ang4] = jointAngles(cycleSize,o1,o2,o3,o4,if1Afrente,..
         gait2 = mod(i + o2-1,cycleSize)+1;
         gait3 = mod(i + o3-1,cycleSize)+1;
         gait4 = mod(i + o4-1,cycleSize)+1;
-        ang1 = rad2deg(if1Afrente(gait1,:));
-        ang2 = rad2deg(if2Afrente(gait2,:));
-        ang3 = rad2deg(if1Atras(gait3,:));
-        ang4 = rad2deg(if2Atras(gait4,:));
-        fprintf("\n ang1_q1: %.4f \n ang1_q2: %.4f \n ang1_q3: %.4f" + ...
-            "\n ang2_q1: %.4f\n ang2_q2: %.4f\n ang2_q3: %.4f\n ang3_q1: %.4f\n" + ...
-            " ang3_q2: %.4f\n ang3_q3: %.4f\n ang4_q1: %.4f\n ang4_q2: %.4f\n ang4_q3: %.4f\n",ang1(1,1)...
+        ang1 = round(rad2deg(if1Afrente(gait1,:)));
+        ang2 = round(rad2deg(if2Afrente(gait2,:)));
+        ang3 = round(rad2deg(if1Atras(gait3,:)));
+        ang4 = round(rad2deg(if2Atras(gait4,:)));
+        fprintf("\n ang1_q1: %d \n ang1_q2: %d \n ang1_q3: %d" + ...
+            "\n ang2_q1: %d\n ang2_q2: %d\n ang2_q3: %d\n ang3_q1: %d\n" + ...
+            " ang3_q2: %d\n ang3_q3: %d\n ang4_q1: %d\n ang4_q2: %d\n ang4_q3: %d\n",ang1(1,1)...
         ,ang1(1,2),ang1(1,3),ang2(1,1),ang2(1,2),ang2(1,3),ang3(1,1),ang3(1,2) ...
         ,ang3(1,3),ang4(1,1),ang4(1,2),ang4(1,3));
 end
