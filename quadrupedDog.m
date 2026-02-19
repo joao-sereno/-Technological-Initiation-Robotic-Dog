@@ -52,7 +52,7 @@ while(1)
     ,ang1(1,1),ang1(1,2),ang1(1,3),ang2(1,1),...
     ang2(1,2),ang2(1,3),ang3(1,1),ang3(1,2),ang3(1,3),ang4(1,1),ang4...
     (1,2),ang4(1,3));
-    writeline(device,angles);
+    %writeline(device,angles);
     i = i + 1;
     if(i>cycleSize)
         i = 1;
@@ -158,13 +158,19 @@ function [ang1,ang2,ang3,ang4] = jointAngles(cycleSize,o1,o2,o3,o4,if1Afrente,..
         gait2 = mod(i + o2-1,cycleSize)+1;
         gait3 = mod(i + o3-1,cycleSize)+1;
         gait4 = mod(i + o4-1,cycleSize)+1;
-        ang1 = round(rad2deg(if1Afrente(gait1,:)));
-        ang2 = round(rad2deg(if2Afrente(gait2,:)));
-        ang3 = round(rad2deg(if1Atras(gait3,:)));
-        ang4 = round(rad2deg(if2Atras(gait4,:)));
+        %Usarei +90° para ter um padrão de offset do servo motor,mas
+        %completamente sujeito à mudança.
+        ang1 = saturate(round(rad2deg(if1Afrente(gait1,:)))+90,0,180);
+        ang2 = saturate(round(rad2deg(if2Afrente(gait2,:)))+90,0,180);
+        ang3 = saturate(round(rad2deg(if1Atras(gait3,:)))+90,0,180);
+        ang4 = saturate(round(rad2deg(if2Atras(gait4,:)))+90,0,180);
         fprintf("\n ang1_q1: %d \n ang1_q2: %d \n ang1_q3: %d" + ...
             "\n ang2_q1: %d\n ang2_q2: %d\n ang2_q3: %d\n ang3_q1: %d\n" + ...
             " ang3_q2: %d\n ang3_q3: %d\n ang4_q1: %d\n ang4_q2: %d\n ang4_q3: %d\n",ang1(1,1)...
         ,ang1(1,2),ang1(1,3),ang2(1,1),ang2(1,2),ang2(1,3),ang3(1,1),ang3(1,2) ...
         ,ang3(1,3),ang4(1,1),ang4(1,2),ang4(1,3));
+end
+%%
+function y = saturate(x,minVal,maxVal)
+    y = min(max(x,minVal),maxVal);
 end
