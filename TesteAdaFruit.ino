@@ -2,33 +2,48 @@
 #include <Adafruit_PWMServoDriver.h>
 #include <string.h>
 #include <stdlib.h>
+#include <LiquidCrystal.h>
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);
 uint16_t limTicks(float us);
 uint16_t degreeToPwm(int degree);
 void anglesRecived(const char *data, int *angles);
 void sendingAnglesToServos(int *angles);
-uint16_t ticks[2] = [limTicks(1000),limTicks(2000)];
-#define NUM_SERVOS 2
-#define SERVO_MIN ticks[0]
-#define SERVO_MAX ticks[1]
+//uint16_t ticks[2] = {limTicks(1000),limTicks(2000)};
+#define NUM_SERVOS 12
+//#define SERVO_MIN ticks[0]
+//#define SERVO_MAX ticks[1]
+#define SERVOMIN 172
+#define SERVOMAX 530
+#define ZERO_POSITION_TICK static_cast<int>((SERVOMIN+SERVOMAX)/2)
 #define NUM_ANGLES 12
-uint8_t angles[12];
+uint16_t angles[NUM_ANGLES];
 uint8_t servoPins[NUM_SERVOS] = {0,1,2,3,4,5,6,7,8,9,10,11};
 Adafruit_PWMServoDriver pwm;
 //uint8_t led = 5;
 
 void setup() {
-  //pinMode(led, OUTPUT);
   Serial.begin(115200);
   pwm.begin();
   pwm.setPWMFreq(50);
-  for(int i = 0; i < NUM_SERVOS; i++){
-    pwm.setPWM(servoPins[i],0,SERVO_MIN);
+  //Calibra os servos
+  for(int j = 0; j < NUM_SERVOS; j++){
+      pwm.setPWM(servoPins[j],0,ZERO_POSITION_TICK);
   }
 }
 void loop() {
   if(Serial.available()>0){
+    //lcd.clear();
     String data = Serial.readStringUntil('\n');
-    anglesRecived(data.c_str(),angles);
+    char buffer[100];  // precisa caber toda a string
+    data.toCharArray(buffer, sizeof(buffer));
+    //lcd.print(data);
+    //delay(500);
+    //for (int posicao = 0; posicao < 21; posicao++)
+    //{
+    //lcd.scrollDisplayLeft();
+    //delay(500);
+    //}
+    anglesRecived(buffer,angles,12);
     sendingAnglesToServos(angles);
     //Salvando os valores dos angulos no vetor do mesmo.
     /*for (int i = 0; i < NUM_ANGLES; i++){
@@ -86,29 +101,51 @@ void loop() {
     }
     delay(15);
   }*/
-  delay(20);
+  //delay(20);
 }
 uint16_t degreeToPwm(int degree){
   degree = constrain(degree,0,180);
-  return map(degree,0,180,SERVO_MIN,SERVO_MAX);
+  return map(degree,0,180,SERVOMIN,SERVOMAX);
+}
+uint16_t degreeToPwmInverse(int degree){
+  degree = constrain(degree,0,180);
+  return map(degree,180,0,SERVOMIN,SERVOMAX);
 }
 uint16_t limTicks(float us){
   return (uint16_t)((us*4096)/20*pow(10,3));
 }
-void anglesRecived(const char *data,int *angles){
+void anglesRecived( char *data,uint16_t* angles,uint8_t size){
+  //lcd.setCursor(0,0);
   char *pt = strtok(data,",");
   uint8_t i=0;
-  uint8_t size = sizeof(angles)/sizeof(angles[0]);
+  //uint8_t size = sizeof(angles)/sizeof(angles[0]);
   while(pt!=NULL && i<size){
     angles[i] = atoi(pt);
+    //lcd.print(angles[i]);
+    //lcd.print(" ");
     pt = strtok(NULL,",");
     i++;
   }
+  //delay(500);
+  //for (int posicao = 0; posicao < 21; posicao++)
+  //  {
+  //  lcd.scrollDisplayLeft();
+  //  delay(500);
+  //  }
 }
 void sendingAnglesToServos(int *angles){
   //Atribuindo os valores dos ângulos recebidos aos servo motores
   for(int j = 0; j < NUM_ANGLES; j++){
-    pwm.setPWM(servoPin[i],0,degreeToPwm(angles[i]));
+    if(j>0 && j<3 || j>5 && j<9){
+      pwm.setPWM(servoPins[j],0,degreeToPwmInverse(angles[j]));
+    }
+    if(j>2 && j<6 || j>8 && j<12){
+      pwm.setPWM(servoPins[j],0,degreeToPwm(angles[j]));
+    }
   }
+  //j>2 && j<6 ||
+  //j>0 && j<3 ||
+  // || j>5 && j<9
+  // || j>8 && j<12
 }
 
