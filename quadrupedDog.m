@@ -6,11 +6,11 @@ configureTerminator(device,"LF")
 %%
 %Definindo as matrizes de transformações homogêneas
 
-L1 = 20.75/100;
-L2 = 33.75/100;
-L3 = -28.5/100;
-L4 = -88.4/100;
-L5 = -68.4/100;
+L1 = 36.75/100;
+L2 = 45.75/100;
+L3 = -50.5/100;
+L4 = -153.5/100;
+L5 = -130.5/100;
 
 [e1_afrente,e1_atras,e2_afrente,e2_atras] = creatHomoMatrix(L1,L2,L3,L4,L5);
 %%
@@ -52,34 +52,35 @@ while(1)
     ,ang1(1,1),ang1(1,2),ang1(1,3),ang2(1,1),...
     ang2(1,2),ang2(1,3),ang3(1,1),ang3(1,2),ang3(1,3),ang4(1,1),ang4...
     (1,2),ang4(1,3));
-    %writeline(device,angles);
+    writeline(device,angles);
     i = i + 1;
     if(i>cycleSize)
         i = 1;
     end
+      % j = j + 1;
+      % if (j > 398)
+      %      break;
+      % end
+    r.waitfor;
+end
+%%
+global d
+d = rateControl(200);
+j = 1;
+while(1)
+     for i = 1:size(ikineCycle1Afrente,1)
+         leg1_afrente.show(gait(ikineCycle1Afrente,i,offsetFirstLeg,false),FastUpdate=true,PreservePlot=false);hold on
+         leg2_afrente.show(gait(ikineCycle2Afrente,i,offsetSecondLeg,false),FastUpdate=true,PreservePlot=false);
+         leg1_atras.show(gait(ikineCycle1Atras,i,offsetThirdLeg,false),FastUpdate=true, PreservePlot= false);
+         leg2_atras.show(gait(ikineCycle2Atras,i,offsetFourthLeg,false),FastUpdate=true,PreservePlot=false);
+         hold off
+         d.waitfor;
+     end
     j = j + 1;
     if (j > 2)
         break;
     end
 end
-%%
-% global d
-% d = rateControl(200);
-% j = 1;
-% while(1)
-%      for i = 1:size(ikineCycle1Afrente,1)
-%          leg1_afrente.show(gait(ikineCycle1Afrente,i,offsetFirstLeg,false),FastUpdate=true,PreservePlot=false);hold on
-%          leg2_afrente.show(gait(ikineCycle2Afrente,i,offsetSecondLeg,false),FastUpdate=true,PreservePlot=false);
-%          leg1_atras.show(gait(ikineCycle1Atras,i,offsetThirdLeg,false),FastUpdate=true, PreservePlot= false);
-%          leg2_atras.show(gait(ikineCycle2Atras,i,offsetFourthLeg,false),FastUpdate=true,PreservePlot=false);
-%          hold off
-%          d.waitfor;
-%      end
-%     j = j + 1;
-%     if (j > 3)
-%         break;
-%     end
-% end
 %% 
 function [e1,e2,e3,e4] = creatHomoMatrix(L1,L2,L3,L4,L5)
     e1 = ETS3.Rx("q1")*ETS3.Ty(-L1)*ETS3.Tx(L2)*ETS3.Tz(L3)*ETS3.Ry("q2")*ETS3.Tz(L4)*ETS3.Ry("q3")*ETS3.Tz(L5);
@@ -106,11 +107,11 @@ end
 %%
 function [qcycle1Afrente,qcycle1Atras,qcycle2Afrente,qcycle2Atras,k] = ...
     qcycleByVia(x1,x2,x3,x4,y1,y2,y3,y4,leg1Af,leg1At,leg2Af,leg2At)
-    zu = -120/100; zd = -140/100;
-    xf1 = 40/100+x1; xb1 = -40/100+x1; 
-    xf2 = 40/100+x2; xb2 = -40/100+x2;
-    xf3 = 40/100+x3; xb3 = -40/100+x3;
-    xf4 = 40/100+x4; xb4 =-40/100+x4 ;
+    zu = -250/100; zd = -300/100;
+    xf1 = 40/100+x1; xb1 = -80/100+x1; 
+    xf2 = 40/100+x2; xb2 = -80/100+x2;
+    xf3 = 40/100+x3; xb3 = -80/100+x3;
+    xf4 = 40/100+x4; xb4 = -80/100+x4 ;
     [qcycle1Afrente,k] = via(xf1,xb1,y1,zu,zd,leg1Af);
     qcycle1Atras = via(xf2,xb2,y2,zu,zd,leg1At);
     qcycle2Afrente = via(xf3,xb3,y3,zu,zd,leg2Af);
@@ -124,7 +125,7 @@ function [qcycle,k] = via(xf,xb,y,zu,zd,leg)
         xf y zu
         xf y zd
     ];
-    location = mstraj(auxVia,[],[3 0.25 0.5 0.25],[],0.01,0.1);
+    location = mstraj(auxVia,[],[3 0.25 0.5 0.25],[],0.01,0.025);
     k = viaTrajectoire(location,zd);
     if(mod(length(location),2)~=0)
     location(length(location),:) = [];
@@ -158,17 +159,16 @@ function [ang1,ang2,ang3,ang4] = jointAngles(cycleSize,o1,o2,o3,o4,if1Afrente,..
         gait2 = mod(i + o2-1,cycleSize)+1;
         gait3 = mod(i + o3-1,cycleSize)+1;
         gait4 = mod(i + o4-1,cycleSize)+1;
-        %Usarei +90° para ter um padrão de offset do servo motor,mas
-        %completamente sujeito à mudança.
         ang1 = saturate(round(rad2deg(if1Afrente(gait1,:)))+90,0,180);
         ang2 = saturate(round(rad2deg(if2Afrente(gait2,:)))+90,0,180);
         ang3 = saturate(round(rad2deg(if1Atras(gait3,:)))+90,0,180);
         ang4 = saturate(round(rad2deg(if2Atras(gait4,:)))+90,0,180);
-        fprintf("\n ang1_q1: %d \n ang1_q2: %d \n ang1_q3: %d" + ...
-            "\n ang2_q1: %d\n ang2_q2: %d\n ang2_q3: %d\n ang3_q1: %d\n" + ...
-            " ang3_q2: %d\n ang3_q3: %d\n ang4_q1: %d\n ang4_q2: %d\n ang4_q3: %d\n",ang1(1,1)...
-        ,ang1(1,2),ang1(1,3),ang2(1,1),ang2(1,2),ang2(1,3),ang3(1,1),ang3(1,2) ...
-        ,ang3(1,3),ang4(1,1),ang4(1,2),ang4(1,3));
+        fprintf("\nang1_q1: %d, ang1_q2: %d , ang1_q3: %d\n" + ...
+        "ang2_q1: %d, ang2_q2: %d , ang2_q3: %d\n" + ...
+        "ang3_q1: %d, ang3_q2: %d , ang3_q3: %d\n" + ...
+        "ang4_q1: %d, ang4_q2: %d , ang4_q3: %d",ang1(1,1),ang1(1,2), ...
+            ang1(1,3),ang2(1,1),ang2(1,2),ang2(1,3),ang3(1,1),ang3(1,2) ...
+            ,ang3(1,3),ang4(1,1),ang4(1,2),ang4(1,3));
 end
 %%
 function y = saturate(x,minVal,maxVal)
