@@ -43,8 +43,7 @@ auxSize = length(ikcy_dir_frente);
 %50hz.
 % r = rateControl(50);
 % reset(r);
-% r = rateControl(50);
-% reset(r);
+% Inicialização das variáveis antes do loop
 % Inicialização das variáveis antes do loop
 p = 0;
 cycleSize = length(ikcy_dir_frente);
@@ -83,19 +82,19 @@ while(1)
     % --- INTERCEPTADOR DE TELETRANSPORTE ---
     % Se já temos histórico gravado, verificamos a diferença do último frame pro novo
     if idx_hist > 1
-        % Agora calculamos o salto das QUATRO pernas
+        % Calcula o tamanho do salto absoluto (em radianos) da Perna 1 e 2
         diff1 = max(abs(ang1(1,:) - ang1_historico(idx_hist-1,:)));
         diff2 = max(abs(ang2(1,:) - ang2_historico(idx_hist-1,:)));
-        diff3 = max(abs(ang3(1,:) - ang3_historico(idx_hist-1,:)));
-        diff4 = max(abs(ang4(1,:) - ang4_historico(idx_hist-1,:)));
         
-        % Se QUALQUER perna pular mais de 0.05 radianos, suavizamos todas
-        if max([diff1, diff2, diff3, diff4]) > 0.05
-            N_frames = 20; 
+        % Se o pulo for maior que ~0.05 radianos, é um teletransporte!
+        if max(diff1, diff2) > 0.05
+            N_frames = 20; % Quantidade de frames para suavizar a transição
             
+            % Criando uma curva em "S" matemática nativa (Interpolação Cosseno)
             t = linspace(0, pi, N_frames)';
-            s = (1 - cos(t)) / 2; 
+            s = (1 - cos(t)) / 2; % Vai de 0 a 1 suavemente
             
+            % Aplica a curva para gerar a matriz de transição de N_frames x 3
             ang1 = (1-s) .* ang1_historico(idx_hist-1,:) + s .* ang1(1,:);
             ang2 = (1-s) .* ang2_historico(idx_hist-1,:) + s .* ang2(1,:);
             ang3 = (1-s) .* ang3_historico(idx_hist-1,:) + s .* ang3(1,:);
@@ -131,7 +130,7 @@ while(1)
         break;
     end
     
-    i = i + 1;
+    i = i + 1
     if(i>cycleSize)
         break;
     end
@@ -146,16 +145,17 @@ ang4_historico = ang4_historico(1:idx_hist-1, :);
 global d
 d = rateControl(20);
 total_frames = size(ang1_historico, 1); % NOVO: Pega o tamanho real com as transições
-
-for i = 1:total_frames
-    % Remover o if(i==200) break; se quiser ver a animação completa
-    
-    leg_dir_afrente.show(ang1_historico(i,:), FastUpdate=true,PreservePlot=false); hold on
-    leg_esq_afrente.show(ang2_historico(i,:), FastUpdate=true,PreservePlot=false); 
-    leg_dir_atras.show(ang3_historico(i,:), FastUpdate=true,PreservePlot=false);
-    leg_esq_atras.show(ang4_historico(i,:), FastUpdate=true,PreservePlot=false);
-    hold off
-    d.waitfor;
+while(1)
+    for i = 1:total_frames
+        % Remover o if(i==200) break; se quiser ver a animação completa
+        
+        leg_dir_afrente.show(ang1_historico(i,:), FastUpdate=true,PreservePlot=false); hold on
+        leg_esq_afrente.show(ang2_historico(i,:), FastUpdate=true,PreservePlot=false); 
+        leg_dir_atras.show(ang3_historico(i,:), FastUpdate=true,PreservePlot=false);
+        leg_esq_atras.show(ang4_historico(i,:), FastUpdate=true,PreservePlot=false);
+        hold off
+        d.waitfor;
+    end
 end
 %%
 global d
@@ -303,31 +303,48 @@ function [ang1,ang2,ang3,ang4,ultimoAux,i,pos1_ultima,pos2_ultima,pos3_ultima, .
             length(q4_corrigido);
         elseif(ultimoAux==0 && aux==2)
             gait1 = mod(i + o1-1,cycleSize)+1;
+
             gait2 = mod(i + o2-1,cycleSize)+1;
+            
             gait3 = mod(i + o3-1,cycleSize)+1;
+            
             gait4 = mod(i + o4-1,cycleSize)+1;
+            
             [~,q2_corrigido,q3_corrigido,q4_corrigido,ultimoAux,...
             pos1,~,~,~] = ...
             fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
             ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
             ik1,ik2,ik3,ik4,weights,p,ultimoAux);
             
-            via1 = [pos1_ultima 
-                    pos1];
+            
+            via1 = [pos1_ultima
+            
+            pos1];
+            
             location1 = mstraj(via1,[],1,[],0.01,0.01);
             
+            
             % Calcula a trajetória da perna 1
+            
             q1_corrigido = ikineTrajNum(leg_dir_af,se3(eye(3),location1),"link8",weights = [0 0 0 1 1 1]);
             
+            
             % --- ADICIONE ESTAS LINHAS ---
+            
             % Descobre quantos passos a trajetória 1 gerou
-            N = size(q1_corrigido, 1); 
+            
+            N = size(q1_corrigido, 1);
+            
             
             % Repete os ângulos estáticos N vezes para igualar as dimensões
+            
             q2_corrigido = repmat(q2_corrigido, N, 1);
+            
             q3_corrigido = repmat(q3_corrigido, N, 1);
-            q4_corrigido = repmat(q4_corrigido, N, 1);
-            % -----------------------------
+            
+            q4_corrigido = repmat(q4_corrigido, N, 1); 
+
+
         elseif(ultimoAux==0 && aux==3)
             gait1 = mod(i + o1-1,cycleSize)+1;
             gait2 = mod(i + o2-1,cycleSize)+1;
