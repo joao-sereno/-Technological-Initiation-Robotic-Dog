@@ -4,8 +4,8 @@ L3 = -50.5/100;
 L4 = -153.5/100;
 L5 = -130.5/100;
 
-W = 180/100;
-L = 300/100;
+W = 130/100;
+L = 250/100;
 
 global Tbase
 Tbase = {
@@ -14,8 +14,6 @@ Tbase = {
     se3(eye(3), [-L/2  -W/2  0]),
     se3(eye(3), [-L/2   W/2  0])
     };
-
-
 [e_dir_frente,e_esq_frente,e_dir_atras,e_esq_atras] = creatHomoMatrix(L1,L2,L3,L4,L5);
 %%
 %Transformando as matrizes em corpos rigídos com formato/estrutura de
@@ -43,71 +41,121 @@ auxSize = length(ikcy_dir_frente);
 %isto, enviando serialmente os valores dos angulos já em graus para o
 %arduino com um ratecontrol de 50Hz, pois os servos motores tem uma freq de
 %50hz.
-r = rateControl(200);
-reset(r);
+% r = rateControl(50);
+% reset(r);
+% r = rateControl(50);
+% reset(r);
+% Inicialização das variáveis antes do loop
+p = 0;
 cycleSize = length(ikcy_dir_frente);
-h = 1;
 i = 1;
-global q1_corr q2_corr q3_corr q4_corr inicializado
+idx_hist = 1; % Índice independente para gravar o histórico contínuo
 
-q1_corr = [];
-q2_corr = [];
-q3_corr = [];
-q4_corr = [];
-inicializado = [];
-global aux
-aux = 0;
-ang1_hist = zeros(cycleSize,3);
-ang2_hist = zeros(cycleSize,3);
-ang3_hist = zeros(cycleSize,3);
-ang4_hist = zeros(cycleSize,3);
+ik1 = inverseKinematics('RigidBodyTree', leg_dir_afrente);
+ik2 = inverseKinematics('RigidBodyTree', leg_esq_afrente);
+ik3 = inverseKinematics('RigidBodyTree', leg_dir_atras);
+ik4 = inverseKinematics('RigidBodyTree', leg_esq_atras);
+weights = [0 0 0 1 1 1];
+ik2.SolverParameters.MaxIterations = 20;
+ik2.SolverParameters.GradientTolerance = 1e-3;
+ik2.SolverParameters.StepTolerance = 1e-3;
+
+% Pré-alocando espaço com folga para as transições (multiplicado por 5 para garantir)
+ang1_historico = zeros(cycleSize*5,3); 
+ang2_historico = zeros(cycleSize*5,3);
+ang3_historico = zeros(cycleSize*5,3);
+ang4_historico = zeros(cycleSize*5,3);
+
+ultimoAux = 1;
+pos1 = [];
+pos2 = [];
+pos3 = [];
+pos4 = [];
+
 while(1)
-    [ang1,ang2,ang3,ang4,aux] = jointAngles(cycleSize,offsetFirstLeg,...
+    % A função retorna os ângulos que a perna deve assumir neste momento
+    [ang1,ang2,ang3,ang4,ultimoAux,i,pos1,pos2,pos3,pos4] = jointAngles(cycleSize,offsetFirstLeg,...
     offsetSecondLeg,offsetThirdLeg,offsetFourthLeg,ikcy_dir_frente, ...
     ikcy_esq_frente,ikcy_dir_atras,ikcy_esq_atras,leg_dir_afrente, ...
-    leg_esq_afrente,leg_dir_atras,leg_esq_atras,i,j,k,aux);
-    angles = sprintf("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d"...
-    ,ang1(1,1),ang1(1,2),ang1(1,3),ang2(1,1),...
-    ang2(1,2),ang2(1,3),ang3(1,1),ang3(1,2),ang3(1,3),ang4(1,1),ang4...
-    (1,2),ang4(1,3));
+    leg_esq_afrente,leg_dir_atras,leg_esq_atras,i,j,k,ik1,ik2,ik3,ik4, ...
+    weights,p,ultimoAux,pos1,pos2,pos3,pos4);
+    
+    % --- INTERCEPTADOR DE TELETRANSPORTE ---
+    % Se já temos histórico gravado, verificamos a diferença do último frame pro novo
+    if idx_hist > 1
+        % Agora calculamos o salto das QUATRO pernas
+        diff1 = max(abs(ang1(1,:) - ang1_historico(idx_hist-1,:)));
+        diff2 = max(abs(ang2(1,:) - ang2_historico(idx_hist-1,:)));
+        diff3 = max(abs(ang3(1,:) - ang3_historico(idx_hist-1,:)));
+        diff4 = max(abs(ang4(1,:) - ang4_historico(idx_hist-1,:)));
+        
+        % Se QUALQUER perna pular mais de 0.05 radianos, suavizamos todas
+        if max([diff1, diff2, diff3, diff4]) > 0.05
+            N_frames = 20; 
+            
+            t = linspace(0, pi, N_frames)';
+            s = (1 - cos(t)) / 2; 
+            
+            ang1 = (1-s) .* ang1_historico(idx_hist-1,:) + s .* ang1(1,:);
+            ang2 = (1-s) .* ang2_historico(idx_hist-1,:) + s .* ang2(1,:);
+            ang3 = (1-s) .* ang3_historico(idx_hist-1,:) + s .* ang3(1,:);
+            ang4 = (1-s) .* ang4_historico(idx_hist-1,:) + s .* ang4(1,:);
+        end
+    end
+    % ---------------------------------------
+    
+    % Pega a quantidade de pontos gerados (1 se normal, 20 se o interceptador rodou)
+    num_passos = size(ang1, 1); 
+    
+    % Executa o buffer de pontos
+    for step = 1:num_passos
+        % Grava a linha correspondente no histórico
+        ang1_historico(idx_hist,:) = ang1(step,:);
+        ang2_historico(idx_hist,:) = ang2(step,:);
+        ang3_historico(idx_hist,:) = ang3(step,:);
+        ang4_historico(idx_hist,:) = ang4(step,:);
+        
+        % Se for usar com o Arduino depois, descomente esta área:
+        % angles = sprintf("%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d,%d"...
+        % ,ang1(step,1),ang1(step,2),ang1(step,3),ang2(step,1),...
+        % ang2(step,2),ang2(step,3),ang3(step,1),ang3(step,2),ang3(step,3),ang4(step,1),ang4...
+        % (step,2),ang4(step,3));
+        % writeline(device,angles);
+        
+        % Incrementa o contador do histórico
+        idx_hist = idx_hist + 1;
+    end
 
-    ang1_hist(i,:) = ang1;
-    ang2_hist(i,:) = ang2;
-    ang3_hist(i,:) = ang3;
-    ang4_hist(i,:) = ang4;
-    %writeline(device,angles);
-    i = i + 1;
-    if(i>cycleSize)
-        %i = 1;
+    p = p + 1;
+    if(p==98)
         break;
     end
-      % h = h + 1;
-      % if (h > 1)
-      %       break;
-      %  end
-    r.waitfor;
+    
+    i = i + 1;
+    if(i>cycleSize)
+        break;
+    end
 end
+
+% Cortando o excesso de zeros pré-alocados no final do script
+ang1_historico = ang1_historico(1:idx_hist-1, :);
+ang2_historico = ang2_historico(1:idx_hist-1, :);
+ang3_historico = ang3_historico(1:idx_hist-1, :);
+ang4_historico = ang4_historico(1:idx_hist-1, :);
 %%
 global d
-d = rateControl(50);
+d = rateControl(20);
+total_frames = size(ang1_historico, 1); % NOVO: Pega o tamanho real com as transições
 
-for i = 1:cycleSize
-
-    leg_dir_afrente.show(ang1_hist(i,:), ...
-        FastUpdate=true,PreservePlot=false); hold on
-
-    leg_esq_afrente.show(ang2_hist(i,:), ...
-        FastUpdate=true,PreservePlot=false);
-
-    leg_dir_atras.show(ang3_hist(i,:), ...
-        FastUpdate=true,PreservePlot=false);
-
-    leg_esq_atras.show(ang4_hist(i,:), ...
-        FastUpdate=true,PreservePlot=false);
-
+for i = 1:total_frames
+    % Remover o if(i==200) break; se quiser ver a animação completa
+    
+    leg_dir_afrente.show(ang1_historico(i,:), FastUpdate=true,PreservePlot=false); hold on
+    leg_esq_afrente.show(ang2_historico(i,:), FastUpdate=true,PreservePlot=false); 
+    leg_dir_atras.show(ang3_historico(i,:), FastUpdate=true,PreservePlot=false);
+    leg_esq_atras.show(ang4_historico(i,:), FastUpdate=true,PreservePlot=false);
     hold off
     d.waitfor;
-
 end
 %%
 global d
@@ -211,15 +259,17 @@ function [o1,o2,o3,o4] = offSet(k,size)
     o4 = round(k + size/4);
 end
 %%
-function [ang1,ang2,ang3,ang4,aux] = jointAngles(cycleSize,o1,o2,o3,o4,ik_dir_af,...
+function [ang1,ang2,ang3,ang4,ultimoAux,i,pos1_ultima,pos2_ultima,pos3_ultima, ...
+    pos4_ultima] = jointAngles(cycleSize,o1,o2,o3,o4,ik_dir_af,...
     ik_esq_af,ik_dir_at,ik_esq_at,leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,i ...
-    ,j,k,aux)
+    ,j,k,ik1,ik2,ik3,ik4,weights,p,ultimoAux,pos1_ultima,pos2_ultima,pos3_ultima, ...
+    pos4_ultima)
         gait1 = mod(i + o1-1,cycleSize)+1;
         gait2 = mod(i + o2-1,cycleSize)+1;
         gait3 = mod(i + o3-1,cycleSize)+1;
         gait4 = mod(i + o4-1,cycleSize)+1;
-        % fprintf("gait 1: %d\n gait 2: %d\n gait 3: %d\n gait 4: %d\n", ...
-        %     gait1,gait2,gait3,gait4);
+        aux = 0;
+
         if(gait1>=k && gait1<=j)
             aux=1;
         elseif(gait2>=k && gait2<=j)
@@ -229,14 +279,157 @@ function [ang1,ang2,ang3,ang4,aux] = jointAngles(cycleSize,o1,o2,o3,o4,ik_dir_af
         elseif(gait4>=k && gait4<=j)
             aux=4;
         end
-        % ang1 = 1;
-        % ang2 = ang1;
-        % ang3 = ang2;
-        % ang4 = ang3;
-        % fprintf("aux: %d\n",aux);
-        [q1_corrigido,q2_corrigido,q3_corrigido,q4_corrigido] = ...
-        fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
-        ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,aux);
+        if(ultimoAux==0 && aux==1)
+            gait1 = mod(i + o1-1,cycleSize)+1;
+            gait2 = mod(i + o2-1,cycleSize)+1;
+            gait3 = mod(i + o3-1,cycleSize)+1;
+            gait4 = mod(i + o4-1,cycleSize)+1;
+
+            [~,q2_corrigido,q3_corrigido,~,ultimoAux,...
+            pos1,~,~,pos4] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
+            ik1,ik2,ik3,ik4,weights,p,ultimoAux);
+
+            via1 = [pos1_ultima 
+                    pos1];
+            location1 = mstraj(via1,[],0.5,[],0.01,0.01);
+            via4 = [pos4_ultima 
+                    pos4];
+            location4 = mstraj(via4,[],0.5,[],0.01,0.01);
+            q1_corrigido = ikineTrajNum(leg_dir_af,se3(eye(3),location1),"link8",weights = [0 0 0 1 1 1]);
+            q4_corrigido = ikineTrajNum(leg_esq_aft,se3(eye(3),location4),"link8",weights = [0 0 0 1 1 1]);
+            length(q1_corrigido);
+            length(q4_corrigido);
+        elseif(ultimoAux==0 && aux==2)
+            gait1 = mod(i + o1-1,cycleSize)+1;
+            gait2 = mod(i + o2-1,cycleSize)+1;
+            gait3 = mod(i + o3-1,cycleSize)+1;
+            gait4 = mod(i + o4-1,cycleSize)+1;
+            [~,q2_corrigido,q3_corrigido,q4_corrigido,ultimoAux,...
+            pos1,~,~,~] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
+            ik1,ik2,ik3,ik4,weights,p,ultimoAux);
+            
+            via1 = [pos1_ultima 
+                    pos1];
+            location1 = mstraj(via1,[],1,[],0.01,0.01);
+            
+            % Calcula a trajetória da perna 1
+            q1_corrigido = ikineTrajNum(leg_dir_af,se3(eye(3),location1),"link8",weights = [0 0 0 1 1 1]);
+            
+            % --- ADICIONE ESTAS LINHAS ---
+            % Descobre quantos passos a trajetória 1 gerou
+            N = size(q1_corrigido, 1); 
+            
+            % Repete os ângulos estáticos N vezes para igualar as dimensões
+            q2_corrigido = repmat(q2_corrigido, N, 1);
+            q3_corrigido = repmat(q3_corrigido, N, 1);
+            q4_corrigido = repmat(q4_corrigido, N, 1);
+            % -----------------------------
+        elseif(ultimoAux==0 && aux==3)
+            gait1 = mod(i + o1-1,cycleSize)+1;
+            gait2 = mod(i + o2-1,cycleSize)+1;
+            gait3 = mod(i + o3-1,cycleSize)+1;
+            gait4 = mod(i + o4-1,cycleSize)+1;
+
+            [q1_corrigido,~,~,q4_corrigido,ultimoAux,...
+            ~,pos2,pos3,~] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
+            ik1,ik2,ik3,ik4,weights,p,ultimoAux);
+
+            via2 = [pos2_ultima 
+                    pos2];
+            location2 = mstraj(via2,[],0.5,[],0.01,0.01);
+            via3 = [pos3_ultima 
+                    pos3];
+            location3 = mstraj(via3,[],0.5,[],0.01,0.01);
+            q2_corrigido = ikineTrajNum(leg,se3(eye(3),location2),"link8",weights = [0 0 0 1 1 1]);
+            q3_corrigido = ikineTrajNum(leg,se3(eye(3),location3),"link8",weights = [0 0 0 1 1 1]);
+            length(q2_corrigido);
+            length(q3_corrigido);
+        elseif(ultimoAux==0 && aux==4)
+            gait1 = mod(i + o1-1,cycleSize)+1;
+            gait2 = mod(i + o2-1,cycleSize)+1;
+            gait3 = mod(i + o3-1,cycleSize)+1;
+            gait4 = mod(i + o4-1,cycleSize)+1;
+
+            [q1_corrigido,q2_corrigido,~,~,ultimoAux,...
+            ~,~,pos3,pos4] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
+            ik1,ik2,ik3,ik4,weights,p,ultimoAux);
+
+            via3 = [pos3_ultima 
+                    pos3];
+            location3 = mstraj(via3,[],0.5,[],0.01,0.01);
+            via4 = [pos4_ultima 
+                    pos4];
+            location4 = mstraj(via4,[],0.5,[],0.01,0.01);
+            q3_corrigido = ikineTrajNum(leg,se3(eye(3),location3),"link8",weights = [0 0 0 1 1 1]);
+            q4_corrigido = ikineTrajNum(leg,se3(eye(3),location4),"link8",weights = [0 0 0 1 1 1]);
+            length(q2_corrigido);
+            length(q3_corrigido);
+        else
+            [q1_corrigido,q2_corrigido,q3_corrigido,q4_corrigido,ultimoAux,...
+            ~,~,~,~] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,aux, ...
+            ik1,ik2,ik3,ik4,weights,p,ultimoAux);
+        end
+
+        if(ultimoAux==1 && aux==0)
+            gait1 = mod(i-1 + o1-1,cycleSize)+1;
+            gait2 = mod(i-1 + o2-1,cycleSize)+1;
+            gait3 = mod(i-1 + o3-1,cycleSize)+1;
+            gait4 = mod(i-1 + o4-1,cycleSize)+1;
+            [q1_corrigido,q2_corrigido,q3_corrigido,q4_corrigido,~,...
+            pos1_ultima,pos2_ultima,~,~] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
+            ik1,ik2,ik3,ik4,weights,p,aux);
+            ultimoAux = 0;
+            i = i + 1;
+            pos1_ultima
+        elseif(ultimoAux==2 && aux==0)
+            gait1 = mod(i-1 + o1-1,cycleSize)+1;
+            gait2 = mod(i-1 + o2-1,cycleSize)+1;
+            gait3 = mod(i-1 + o3-1,cycleSize)+1;
+            gait4 = mod(i-1 + o4-1,cycleSize)+1;
+            [q1_corrigido,q2_corrigido,q3_corrigido,q4_corrigido,~,...
+            ~,pos2_ultima,~,~] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
+            ik1,ik2,ik3,ik4,weights,p,aux);
+            ultimoAux = 0;
+            i = i + 1;
+        elseif(ultimoAux==3 && aux==0)
+            gait1 = mod(i-1 + o1-1,cycleSize)+1;
+            gait2 = mod(i-1 + o2-1,cycleSize)+1;
+            gait3 = mod(i-1 + o3-1,cycleSize)+1;
+            gait4 = mod(i-1 + o4-1,cycleSize)+1;
+            [q1_corrigido,q2_corrigido,q3_corrigido,q4_corrigido,~,...
+            ~,~,pos3_ultima,~] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
+            ik1,ik2,ik3,ik4,weights,p,aux);
+            ultimoAux = 0;
+            i = i + 1;
+        elseif(ultimoAux==4 && aux==0)
+            gait1 = mod(i-1 + o1-1,cycleSize)+1;
+            gait2 = mod(i-1 + o2-1,cycleSize)+1;
+            gait3 = mod(i-1 + o3-1,cycleSize)+1;
+            gait4 = mod(i-1 + o4-1,cycleSize)+1;
+            [q1_corrigido,q2_corrigido,q3_corrigido,q4_corrigido,~,...
+            ~,~,~,pos4_ultima] = ...
+            fowardKinematics(ik_dir_af(gait1,:),ik_esq_af(gait2,:),ik_dir_at(gait3,:) ...
+            ,ik_esq_at(gait4,:),leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_aft,ultimoAux, ...
+            ik1,ik2,ik3,ik4,weights,p,aux);
+            ultimoAux = 0;
+            i = i + 1;
+        end
 
         ang1 = q1_corrigido;
         ang2 = q2_corrigido;
@@ -259,21 +452,14 @@ function y = saturate(x,minVal,maxVal)
     y = min(max(x,minVal),maxVal);
 end
 %%
-function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang4,if_dir_af,if_esq_af, ...
-    if_dir_at,if_esq_at,aux)
-    
-    global q1_corr q2_corr q3_corr q4_corr inicializado
-
-    if isempty(inicializado)
-        q1_corr = ang1;
-        q2_corr = ang2;
-        q3_corr = ang3;
-        q4_corr = ang4;
-        inicializado = true;
-    end
-    
+function [q1_corr,q2_corr,q3_corr,q4_corr,ultimoAux,posicao1,posicao2, ...
+    posicao3, posicao4] = fowardKinematics(ang1,ang2,ang3,ang4,if_dir_af, ...
+    if_esq_af,if_dir_at,if_esq_at,aux,ik1,ik2,ik3,ik4,weights,p,ultimoAux)
     global Tbase
-    
+    q1_corr = ang1;
+    q2_corr = ang2;
+    q3_corr = ang3;
+    q4_corr = ang4;
     T = Tbase{1} * se3(if_dir_af.getTransform([ang1(1,1) ang1(1,2) ang1(1,3)],"link8"));
     aux1 = T.trvec;
     x1 = aux1(1,1);
@@ -293,45 +479,43 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
     
     CoM = calculateCoM(if_dir_af,if_esq_af,if_dir_at,if_esq_at,ang1,ang2 ...
         ,ang3,ang4);
-    disp(aux)
+    %disp(aux)
+    posicao1 = [x1,y1,aux1(3)];
+    posicao2 = [x2,y2,aux2(3)];
+    posicao3 = [x3,y3,aux3(3)];
+    posicao4 = [x4,y4,aux4(3)];
     if(aux==1)
-        q1 = q1_corr;
-        q2 = q2_corr;
-        q3 = q3_corr;
-        q4 = q4_corr;
-        poly = [x2 y2
-                x3 y3
-                x4 y4];
-        % figure
-        % hold on
-        % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
-        % axis equal
-        % grid on
-        % 
-        % xq = CoM(1);
-        % yq = CoM(2);
-        % 
-        % [in,on] = inpolygon(xq,yq,poly(:,1),poly(:,2));
-        % 
-        % if in
-        %     plot(xq,yq,'r+','MarkerSize',10,'LineWidth',2)
-        % else
-        %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
-        % end
-        % xlabel('Eixo x')
-        % ylabel('Eixo y')
-        % title('Gráfico polígono de suporte com o Centro de Massa')
+        ultimoAux = aux;
+            % poly = [x2 y2
+            %     x3 y3
+            %     x4 y4];
+            % figure
+            % hold on
+            % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
+            % axis equal
+            % grid on
+            % 
+            % xq = CoM(1);
+            % yq = CoM(2);
+            % 
+            % [in,on] = inpolygon(xq,yq,poly(:,1),poly(:,2));
+            % 
+            % if in
+            %     plot(xq,yq,'r+','MarkerSize',10,'LineWidth',2)
+            % else
+            %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
+            % end
+            % hold off
         A = [x2 y2];
         B = [x3 y3];
         C = [x4 y4];
-        % hold off
-        % disp(CoM)
-        area = (B(1)-A(1))*(C(2)-A(2)) - (B(2)-A(2))*(C(1)-A(1));
+        %disp(CoM)
+        area = ((B(1)-A(1))*(C(2)-A(2)) - (B(2)-A(2))*(C(1)-A(1)));
         if area < 0
             temp = B;
             B = C;
             C = temp;
-        end   
+        end
         [MSM,P1,P2] = calculaMSM(A,B,C,CoM);
         MSM_min = 3.0/100;
         % if(MSM<MSM_min)
@@ -346,22 +530,21 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
         %disp(MSM)
         LSM = calculaLSM(A,B,C,CoM);
         CoM_corrigido = CoM;
-        if isnan(LSM) || LSM < MSM_min || LSM < MSM
+        if isnan(LSM) || LSM < MSM
             e = P2 - P1;
             n = [-e(2),e(1)];
             n_unitario= n/norm(n);
-
+            
             centro = (A+B+C)/3;
             if dot(n_unitario,centro-CoM)<0
                 n_unitario = -n_unitario;
             end
             MSM_desejado = 0.03;
-            delta = 5*(MSM_desejado - MSM);
+            delta = MSM_desejado - MSM;
             deltaP = delta*n_unitario;
             CoM_corrigido = CoM + deltaP;
-            % disp(CoM_corrigido);
-            xq = CoM_corrigido(1);
-            yq = CoM_corrigido(2);
+            % xq = CoM_corrigido(1);
+            % yq = CoM_corrigido(2);
             % figure
             % hold on
             % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
@@ -373,66 +556,60 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
             % else
             %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
             % end
-            % xlabel('Eixo x')
-            % ylabel('Eixo y')
-            % title('Gráfico polígono de suporte com o Centro de Massa')
         end
+
         deltaX = CoM_corrigido(1) - CoM(1);
         deltaY = CoM_corrigido(2) - CoM(2);
+        
+        altura2 = aux2(3);
+        altura3 = aux3(3);
+        altura4 = aux4(3);
 
-        %Jacobiano que resolverá o deslocamento necessário para
-        %estabilizar o robo.
-        delta_vec = [-deltaX; -deltaY; 0];
-    
-        % PERNA 2
-        J2 = geometricJacobian(if_esq_af, q2, "link8");
-        dq2 = pinv(J2(1:3,:)) * delta_vec;
-        q2_corr = q2_corr + dq2';
-    
-        % PERNA 3
-        J3 = geometricJacobian(if_dir_at, q3, "link8");
-        dq3 = pinv(J3(1:3,:)) * delta_vec;
-        q3_corr = q3_corr + dq3';
-    
-        % PERNA 4
-        J4 = geometricJacobian(if_esq_at, q4, "link8");
-        dq4 = pinv(J4(1:3,:)) * delta_vec;
-        q4_corr = q4_corr + dq4';
-        % z2 = aux2(1,3);
-        % z3 = aux3(1,3);
-        % z4 = aux4(1,3);
-        % 
-        % pos2 = [x2 - deltaX, y2 - deltaY, z2];
-        % pos3 = [x3 - deltaX, y3 - deltaY, z3];
-        % pos4 = [x4 - deltaX, y4 - deltaY, z4];
+        posicao2 = [x2-deltaX, y2-deltaY,altura2];
+        posicao3 = [x3-deltaX, y3-deltaY,altura3];
+        posicao4 = [x4-deltaX, y4-deltaY,altura4];
 
-        % q2_novo = ikineTrajNum(if_esq_af, se3(eye(3),pos2), "link8", weights=[0 0 0 1 1 1]);
-        % q3_novo = ikineTrajNum(if_dir_at, se3(eye(3),pos3), "link8", weights=[0 0 0 1 1 1]);
-        % q4_novo = ikineTrajNum(if_esq_at, se3(eye(3),pos4), "link8", weights=[0 0 0 1 1 1]);
-        % 
-        % q2_novo = q2_novo(end,:);
-        % q3_novo = q3_novo(end,:);
-        % q4_novo = q4_novo(end,:);
-        % T2 = se3(eye(3), pos2);
-        % T3 = se3(eye(3), pos3);
-        % T4 = se3(eye(3), pos4);
-        % 
-        % q2_novo = ikine(if_esq_af, T2, "link8", ang2, "Weights", [0 0 0 1 1 1]);
-        % q3_novo = ikine(if_dir_at, T3, "link8", ang3, "Weights", [0 0 0 1 1 1]);
-        % q4_novo = ikine(if_esq_at, T4, "link8", ang4, "Weights", [0 0 0 1 1 1]);
-        % 
-        % ang2 = q2_novo;
-        % ang3 = q3_novo;
-        % ang4 = q4_novo;
+        T2 = trvec2tform(posicao2);
+        T3 = trvec2tform(posicao3);
+        T4 = trvec2tform(posicao4);
+
+        [q2_corr, ~] = ik2("link8", T2, weights, q2_corr);
+        [q3_corr, ~] = ik3("link8", T3, weights, q3_corr);
+        [q4_corr, ~] = ik4("link8", T4, weights, q4_corr);
+        %p
+        if(p==95)
+            pontos_x = [x1; x2-deltaX; x3-deltaX; x4-deltaX];
+            pontos_y = [y1; y2-deltaY; y3-deltaY; y4-deltaY];
+            [K, ~] = convhull(pontos_x, pontos_y);
+            poly = [pontos_x(K), pontos_y(K)];
+        
+            figure
+            hold on
+            plot(poly(:,1), poly(:,2), 'k-', 'LineWidth', 2) % Desenha o perímetro correto
+            plot(pontos_x, pontos_y, 'ko', 'MarkerFaceColor', 'k') % Desenha os 4 apoios
+            axis equal
+            grid on
+        
+            xq = CoM_corrigido(1);
+            yq = CoM_corrigido(2);
+        
+            [in,on] = inpolygon(xq,yq,poly(:,1),poly(:,2));
+        
+            if in
+                plot(xq,yq,'r+','MarkerSize',10,'LineWidth',2)
+            else
+                plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
+            end
+            hold off
+        end
+
     elseif(aux==2)
-        q1 = q1_corr;
-        q2 = q2_corr;
-        q3 = q3_corr;
-        q4 = q4_corr;
-        poly = [x1 y1
-                x3 y3
-                x4 y4];
-
+        ultimoAux = aux;
+        % 
+        % poly = [x1 y1
+        %         x3 y3
+        %         x4 y4];
+        % 
         % figure
         % hold on
         % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
@@ -449,17 +626,18 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
         % else
         %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
         % end
+        % hold off
         A = [x1 y1];
         B = [x3 y3];
         C = [x4 y4];
-        % hold off
-        % disp(CoM)
-        area = (B(1)-A(1))*(C(2)-A(2)) - (B(2)-A(2))*(C(1)-A(1));
+        %disp(CoM);
+        calculaMSM(A,B,C,CoM);
+        area = ((B(1)-A(1))*(C(2)-A(2)) - (B(2)-A(2))*(C(1)-A(1)));
         if area < 0
             temp = B;
             B = C;
             C = temp;
-        end   
+        end
         [MSM,P1,P2] = calculaMSM(A,B,C,CoM);
         MSM_min = 3.0/100;
         % if(MSM<MSM_min)
@@ -474,22 +652,21 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
         %disp(MSM)
         LSM = calculaLSM(A,B,C,CoM);
         CoM_corrigido = CoM;
-        if isnan(LSM) || LSM < MSM_min || LSM < MSM
+        if isnan(LSM) || LSM < MSM
             e = P2 - P1;
             n = [-e(2),e(1)];
             n_unitario= n/norm(n);
-
+            
             centro = (A+B+C)/3;
             if dot(n_unitario,centro-CoM)<0
                 n_unitario = -n_unitario;
             end
             MSM_desejado = 0.03;
-            delta = 5*(MSM_desejado - MSM);
+            delta = MSM_desejado - MSM;
             deltaP = delta*n_unitario;
             CoM_corrigido = CoM + deltaP;
-            % disp(CoM_corrigido);
-            xq = CoM_corrigido(1);
-            yq = CoM_corrigido(2);
+            % xq = CoM_corrigido(1);
+            % yq = CoM_corrigido(2);
             % figure
             % hold on
             % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
@@ -501,64 +678,33 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
             % else
             %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
             % end
-            % xlabel('Eixo x')
-            % ylabel('Eixo y')
-            % title('Gráfico polígono de suporte com o Centro de Massa')
         end
+
         deltaX = CoM_corrigido(1) - CoM(1);
         deltaY = CoM_corrigido(2) - CoM(2);
-        delta_vec = [-deltaX; -deltaY; 0];
-        % PERNA 1
-        J1 = geometricJacobian(if_dir_af, q1, "link8");
-        dq1 = pinv(J1(1:3,:)) * delta_vec;
-        q1_corr = q1_corr + dq1';
-    
-        % PERNA 3
-        J3 = geometricJacobian(if_dir_at, q3, "link8");
-        dq3 = pinv(J3(1:3,:)) * delta_vec;
-        q3_corr = q3_corr + dq3';
-    
-        % PERNA 4
-        J4 = geometricJacobian(if_esq_at, q4, "link8");
-        dq4 = pinv(J4(1:3,:)) * delta_vec;
-        q4_corr = q4_corr + dq4';
-        % z1 = aux1(1,3);
-        % z3 = aux3(1,3);
-        % z4 = aux4(1,3);
-        % 
-        % pos1 = [x1 - deltaX, y1 - deltaY, z1];
-        % pos3 = [x3 - deltaX, y3 - deltaY, z3];
-        % pos4 = [x4 - deltaX, y4 - deltaY, z4];
+        
+        altura1 = aux1(3);
+        altura3 = aux3(3);
+        altura4 = aux4(3);
 
-        % q1_novo = ikineTrajNum(if_esq_af, se3(eye(3),pos1), "link8", weights=[0 0 0 1 1 1]);
-        % q3_novo = ikineTrajNum(if_dir_at, se3(eye(3),pos3), "link8", weights=[0 0 0 1 1 1]);
-        % q4_novo = ikineTrajNum(if_esq_at, se3(eye(3),pos4), "link8", weights=[0 0 0 1 1 1]);
-        % 
-        % q1_novo = q1_novo(end,:);
-        % q3_novo = q3_novo(end,:);
-        % q4_novo = q4_novo(end,:);
-        % 
-        % T1 = se3(eye(3), pos1);
-        % T3 = se3(eye(3), pos3);
-        % T4 = se3(eye(3), pos4);
-        % 
-        % q1_novo = ikine(if_esq_af, T1, "link8", ang1, "Weights", [0 0 0 1 1 1]);
-        % q3_novo = ikine(if_dir_at, T3, "link8", ang3, "Weights", [0 0 0 1 1 1]);
-        % q4_novo = ikine(if_esq_at, T4, "link8", ang4, "Weights", [0 0 0 1 1 1]);
-        % 
-        % ang1 = q1_novo;
-        % ang3 = q3_novo;
-        % ang4 = q4_novo;
-        
+        posicao1 = [x1-deltaX, y1-deltaY,altura1];
+        posicao3 = [x3-deltaX, y3-deltaY,altura3];
+        posicao4 = [x4-deltaX, y4-deltaY,altura4];
+
+        T1 = trvec2tform(posicao1);
+        T3 = trvec2tform(posicao3);
+        T4 = trvec2tform(posicao4);
+
+        [q1_corr, ~] = ik1("link8", T1, weights, q1_corr);
+        [q3_corr, ~] = ik3("link8", T3, weights, q3_corr);
+        [q4_corr, ~] = ik4("link8", T4, weights, q4_corr);
+
     elseif(aux==3)
-        q1 = q1_corr;
-        q2 = q2_corr;
-        q3 = q3_corr;
-        q4 = q4_corr;
-        poly = [x1 y1
-                x2 y2
-                x4 y4];
-        
+        ultimoAux = aux;
+        % poly = [x1 y1
+        %         x2 y2
+        %         x4 y4];
+        % 
         % figure
         % hold on
         % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
@@ -576,16 +722,17 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
         %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
         % end
         % hold off
+        % disp(CoM)
         A = [x1 y1];
         B = [x2 y2];
         C = [x4 y4];
-        %disp(CoM);
-         area = (B(1)-A(1))*(C(2)-A(2)) - (B(2)-A(2))*(C(1)-A(1));
+        calculaMSM(A,B,C,CoM);
+        area = ((B(1)-A(1))*(C(2)-A(2)) - (B(2)-A(2))*(C(1)-A(1)));
         if area < 0
             temp = B;
             B = C;
             C = temp;
-        end   
+        end
         [MSM,P1,P2] = calculaMSM(A,B,C,CoM);
         MSM_min = 3.0/100;
         % if(MSM<MSM_min)
@@ -600,22 +747,21 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
         %disp(MSM)
         LSM = calculaLSM(A,B,C,CoM);
         CoM_corrigido = CoM;
-        if isnan(LSM) || LSM < MSM_min || LSM < MSM
+        if isnan(LSM) || LSM < MSM
             e = P2 - P1;
             n = [-e(2),e(1)];
             n_unitario= n/norm(n);
-
+            
             centro = (A+B+C)/3;
             if dot(n_unitario,centro-CoM)<0
                 n_unitario = -n_unitario;
             end
             MSM_desejado = 0.03;
-            delta = 5*(MSM_desejado - MSM);
+            delta = MSM_desejado - MSM;
             deltaP = delta*n_unitario;
             CoM_corrigido = CoM + deltaP;
-            % disp(CoM_corrigido);
-            xq = CoM_corrigido(1);
-            yq = CoM_corrigido(2);
+            % xq = CoM_corrigido(1);
+            % yq = CoM_corrigido(2);
             % figure
             % hold on
             % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
@@ -627,54 +773,32 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
             % else
             %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
             % end
-            % xlabel('Eixo x')
-            % ylabel('Eixo y')
-            % title('Gráfico polígono de suporte com o Centro de Massa')
         end
+
         deltaX = CoM_corrigido(1) - CoM(1);
         deltaY = CoM_corrigido(2) - CoM(2);
-        delta_vec = [-deltaX; -deltaY; 0];
-        % PERNA 1
-        J1 = geometricJacobian(if_dir_af, q1, "link8");
-        dq1 = pinv(J1(1:3,:)) * delta_vec;
-        q1_corr = q1_corr + dq1';
-    
-        % PERNA 2
-        J2 = geometricJacobian(if_esq_af, q2, "link8");
-        dq2 = pinv(J2(1:3,:)) * delta_vec;
-        q2_corr = q2_corr + dq2';
-    
-        % PERNA 4
-        J4 = geometricJacobian(if_esq_at, q4, "link8");
-        dq4 = pinv(J4(1:3,:)) * delta_vec;
-        q4_corr = q4_corr + dq4';
-        % z1 = aux1(1,3);
-        % z2 = aux2(1,3);
-        % z4 = aux4(1,3);
-        % 
-        % pos1 = [x1 - deltaX, y1 - deltaY, z1];
-        % pos2 = [x2 - deltaX, y2 - deltaY, z2];
-        % pos4 = [x4 - deltaX, y4 - deltaY, z4];
-        % 
-        % T1 = se3(eye(3), pos1);
-        % T2 = se3(eye(3), pos2);
-        % T4 = se3(eye(3), pos4);
-        % 
-        % q1_novo = ikine(if_esq_af, T1, "link8", ang1, "Weights", [0 0 0 1 1 1]);
-        % q2_novo = ikine(if_dir_at, T2, "link8", ang2, "Weights", [0 0 0 1 1 1]);
-        % q4_novo = ikine(if_esq_at, T4, "link8", ang4, "Weights", [0 0 0 1 1 1]);
-        % 
-        % ang1 = q1_novo;
-        % ang2 = q2_novo;
-        % ang4 = q4_novo;
+        
+        altura1 = aux1(3);
+        altura2 = aux2(3);
+        altura4 = aux4(3);
+
+        posicao1 = [x1-deltaX, y1-deltaY,altura1];
+        posicao2 = [x2-deltaX, y2-deltaY,altura2];
+        posicao4 = [x4-deltaX, y4-deltaY,altura4];
+
+        T1 = trvec2tform(posicao1);
+        T2 = trvec2tform(posicao2);
+        T4 = trvec2tform(posicao4);
+
+        [q1_corr, ~] = ik1("link8", T1, weights, q1_corr);
+        [q2_corr, ~] = ik2("link8", T2, weights, q2_corr);
+        [q4_corr, ~] = ik4("link8", T4, weights, q4_corr);
+
     elseif(aux==4)
-        q1 = q1_corr;
-        q2 = q2_corr;
-        q3 = q3_corr;
-        q4 = q4_corr;
-        poly = [x1 y1
-                x2 y2
-                x3 y3];
+        ultimoAux = aux;
+        % poly = [x1 y1
+        %         x2 y2
+        %         x3 y3];
         % figure
         % hold on
         % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
@@ -692,16 +816,18 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
         %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
         % end
         % hold off
+        % disp(CoM)
         A = [x1 y1];
         B = [x2 y2];
         C = [x3 y3];
-        % disp(CoM)
-         area = (B(1)-A(1))*(C(2)-A(2)) - (B(2)-A(2))*(C(1)-A(1));
+        %disp(CoM);
+        calculaMSM(A,B,C,CoM);
+        area = ((B(1)-A(1))*(C(2)-A(2)) - (B(2)-A(2))*(C(1)-A(1)));
         if area < 0
             temp = B;
             B = C;
             C = temp;
-        end   
+        end
         [MSM,P1,P2] = calculaMSM(A,B,C,CoM);
         MSM_min = 3.0/100;
         % if(MSM<MSM_min)
@@ -716,22 +842,21 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
         %disp(MSM)
         LSM = calculaLSM(A,B,C,CoM);
         CoM_corrigido = CoM;
-        if isnan(LSM) || LSM < MSM || LSM < MSM
+        if isnan(LSM) || LSM < MSM
             e = P2 - P1;
             n = [-e(2),e(1)];
             n_unitario= n/norm(n);
-
+            
             centro = (A+B+C)/3;
             if dot(n_unitario,centro-CoM)<0
                 n_unitario = -n_unitario;
             end
             MSM_desejado = 0.03;
-            delta = 5*(MSM_desejado - MSM);
+            delta = MSM_desejado - MSM;
             deltaP = delta*n_unitario;
             CoM_corrigido = CoM + deltaP;
-            % disp(CoM_corrigido);
-            xq = CoM_corrigido(1);
-            yq = CoM_corrigido(2);
+            % xq = CoM_corrigido(1);
+            % yq = CoM_corrigido(2);
             % figure
             % hold on
             % plot([poly(:,1); poly(1,1)], [poly(:,2); poly(1,2)], 'k-')
@@ -743,59 +868,29 @@ function [q1_novo,q2_novo,q3_novo,q4_novo] = fowardKinematics(ang1,ang2,ang3,ang
             % else
             %     plot(xq,yq,'bo','MarkerSize',10,'LineWidth',2)
             % end
-            % xlabel('Eixo x')
-            % ylabel('Eixo y')
-            % title('Gráfico polígono de suporte com o Centro de Massa')
         end
+
         deltaX = CoM_corrigido(1) - CoM(1);
         deltaY = CoM_corrigido(2) - CoM(2);
-        delta_vec = [-deltaX; -deltaY; 0];
-        % PERNA 1
-        J1 = geometricJacobian(if_dir_af, q1, "link8");
-        dq1 = pinv(J1(1:3,:)) * delta_vec;
-        q1_corr = q1_corr + dq1';
-    
-        % PERNA 2
-        J2 = geometricJacobian(if_esq_af, q2, "link8");
-        dq2 = pinv(J2(1:3,:)) * delta_vec;
-        q2_corr = q2_corr + dq2';
-    
-        % PERNA 4
-        J3 = geometricJacobian(if_dir_at, q3, "link8");
-        dq3 = pinv(J3(1:3,:)) * delta_vec;
-        q3_corr = q3_corr + dq3';
-        % z1 = aux1(1,3);
-        % z2 = aux2(1,3);
-        % z3 = aux3(1,3);
-        % 
-        % pos1 = [x1 - deltaX, y1 - deltaY, z1];
-        % pos2 = [x2 - deltaX, y2 - deltaY, z2];
-        % pos3 = [x3 - deltaX, y3 - deltaY, z3];
+        
+        altura1 = aux1(3);
+        altura2 = aux2(3);
+        altura3 = aux3(3);
 
-        % q1_novo = ikineTrajNum(if_esq_af, se3(eye(3),pos1), "link8", weights=[0 0 0 1 1 1]);
-        % q2_novo = ikineTrajNum(if_dir_at, se3(eye(3),pos2), "link8", weights=[0 0 0 1 1 1]);
-        % q3_novo = ikineTrajNum(if_esq_at, se3(eye(3),pos3), "link8", weights=[0 0 0 1 1 1]);
-        % 
-        % q1_novo = q1_novo(end,:);
-        % q2_novo = q2_novo(end,:);
-        % q3_novo = q3_novo(end,:);
-        % T1 = se3(eye(3), pos1);
-        % T2 = se3(eye(3), pos2);
-        % T3 = se3(eye(3), pos3);
-        % 
-        % q1_novo = ikine(if_esq_af, T1, "link8", ang1, "Weights", [0 0 0 1 1 1]);
-        % q2_novo = ikine(if_dir_at, T2, "link8", ang2, "Weights", [0 0 0 1 1 1]);
-        % q3_novo = ikine(if_esq_at, T3, "link8", ang3, "Weights", [0 0 0 1 1 1]);
-        % 
-        % ang1 = q1_novo;
-        % ang2 = q2_novo;
-        % ang3 = q3_novo;
+        posicao1 = [x1-deltaX, y1-deltaY,altura1];
+        posicao2 = [x2-deltaX, y2-deltaY,altura2];
+        posicao3 = [x3-deltaX, y3-deltaY,altura3];
+
+        T1 = trvec2tform(posicao1);
+        T2 = trvec2tform(posicao2);
+        T3 = trvec2tform(posicao3);
+
+        [q1_corr, ~] = ik1("link8", T1, weights, q1_corr);
+        [q2_corr, ~] = ik2("link8", T2, weights, q2_corr);
+        [q3_corr, ~] = ik3("link8", T3, weights, q3_corr);
 
     end
-    q1_novo = q1_corr;
-    q2_novo = q2_corr;
-    q3_novo = q3_corr;
-    q4_novo = q4_corr;
+
 end
 %%
 function finalCoM = calculateCoM(leg_dir_af,leg_esq_af,leg_dir_at,leg_esq_at, ...
@@ -888,7 +983,6 @@ function [lsm]  = calculaLSM(A,B,C,P)
     v = [1 0];
     Rx = P(1) + t*v(1);
     Ry = P(2) + t*v(2);
-
     %Lado AB
     Sx = A(1) + u*(B(1)-A(1));
     Sy = A(2) + u*(B(2)-A(2));
