@@ -55,9 +55,7 @@ ik2 = inverseKinematics('RigidBodyTree', leg_esq_afrente);
 ik3 = inverseKinematics('RigidBodyTree', leg_dir_atras);
 ik4 = inverseKinematics('RigidBodyTree', leg_esq_atras);
 weights = [0 0 0 1 1 1];
-ik2.SolverParameters.MaxIterations = 20;
-ik2.SolverParameters.GradientTolerance = 1e-3;
-ik2.SolverParameters.StepTolerance = 1e-3;
+
 
 global q1_corr q2_corr q3_corr q4_corr inicializado
 q1_corr = [];
@@ -86,33 +84,28 @@ while(1)
 
     if idx_hist > 1
         
-        diff1 = max(abs(ang1(1,:) - ang1_historico(idx_hist-1,:)));
-        diff2 = max(abs(ang2(1,:) - ang2_historico(idx_hist-1,:)));
-        diff3 = max(abs(ang3(1,:) - ang3_historico(idx_hist-1,:)));
-        diff4 = max(abs(ang4(1,:) - ang4_historico(idx_hist-1,:)));
-        % Se o pulo for maior que ~0.05 radianos, é um teletransporte!
-        if (max(diff1,diff2)> 1)||(max(diff2,diff3) > 0.9)||(max(diff3,diff4) > 1) ||(max(diff4,diff1) > 0.5)
+        diff1 = max(abs(ang1(1,:) - ang1_historico(idx_hist-1,:)))
+        diff2 = max(abs(ang2(1,:) - ang2_historico(idx_hist-1,:)))
+        diff3 = max(abs(ang3(1,:) - ang3_historico(idx_hist-1,:)))
+        diff4 = max(abs(ang4(1,:) - ang4_historico(idx_hist-1,:)))
+
+        if (max(diff1,diff2)> 0.5)||(max(diff2,diff3) > 0.5)||(max(diff3,diff4) > 0.5) ||(max(diff4,diff1) > 0.5)
             N_frames = 20; % Quantidade de frames para suavizar a transição
             
             % Criando uma curva em "S" matemática nativa (Interpolação Cosseno)
             t = linspace(0, pi, N_frames)';
-            s = (1 - cos(t)) / 2; % Vai de 0 a 1 suavemente
+            s = (1 - cos(t)) / 2;
             
-            % Aplica a curva para gerar a matriz de transição de N_frames x 3
             ang1 = (1-s) .* ang1_historico(idx_hist-1,:) + s .* ang1(1,:);
             ang2 = (1-s) .* ang2_historico(idx_hist-1,:) + s .* ang2(1,:);
             ang3 = (1-s) .* ang3_historico(idx_hist-1,:) + s .* ang3(1,:);
             ang4 = (1-s) .* ang4_historico(idx_hist-1,:) + s .* ang4(1,:);
         end
     end
-    % ---------------------------------------
     
-    % Pega a quantidade de pontos gerados (1 se normal, 20 se o interceptador rodou)
     num_passos = size(ang1, 1); 
     
-    % Executa o buffer de pontos
     for step = 1:num_passos
-        % Grava a linha correspondente no histórico
         ang1_historico(idx_hist,:) = ang1(step,:);
         ang2_historico(idx_hist,:) = ang2(step,:);
         ang3_historico(idx_hist,:) = ang3(step,:);
@@ -129,7 +122,7 @@ while(1)
         idx_hist = idx_hist + 1;
     end
 
-    i = i + 1
+    i = i + 1;
     if(i>cycleSize+3)
         break;
     end
@@ -196,7 +189,7 @@ while(1)
         lighting gouraud;
         material shiny;
         axis equal;   
-        view(45, 30); 
+        %view(45, 30); 
         grid on;      
         
         hold off;
@@ -252,7 +245,7 @@ end
 function [qcy_dir_af,qcy_esq_af,qcy_dir_at,qcy_esq_at,k,j] = ...
     qcycleByVia(x1,x2,x3,x4,y1,y2,y3,y4,leg_dir_af,leg_esq_af,leg_dir_at, ...
     leg_esq_at)
-    zu = -250/100; zd = -300/100;
+    zu = -200/100; zd = -250/100;
     xf1 = 40/100+x1; xb1 = -80/100+x1; 
     xf2 = 40/100+x2; xb2 = -80/100+x2;
     xf3 = 40/100+x3; xb3 = -80/100+x3;
