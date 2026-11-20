@@ -16,7 +16,7 @@ configureTerminator(device, "LF"); % Define Line Feed (\n) como terminador de pa
 % Dimensões dos elos (links) das pernas
 L1 = 42/100;      % Deslocamento lateral do ombro (coxa)
 L2 = 48/100;      % Deslocamento longitudinal do ombro
-L3 = -50.5/100;   % Deslocamento vertical inicial do ombro
+L3 = -60/100;   % Deslocamento vertical inicial do ombro
 L4 = -147.6/100;  % Comprimento da coxa (fêmur)
 L5 = -127.6/100;  % Comprimento da canela (tíbia)
 
